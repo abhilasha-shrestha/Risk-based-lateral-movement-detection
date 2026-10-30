@@ -1,0 +1,6 @@
+# Phase 1 needs only the first two. The rest are for later phases.
+psycopg[binary]==3.2.3
+python-dotenv==1.0.1
+# Phase 3+
+neo4j==5.27.0
+streamlit==1.40.2

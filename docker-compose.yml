@@ -1,0 +1,44 @@
+# Lateral Movement Detection — local databases.
+# Run from WSL:  cd /mnt/c/Users/abhil/Desktop/DBMS && docker compose up -d
+# Stop:          docker compose down         (keeps data)
+# Wipe + reset:  docker compose down -v       (deletes data — use when ETL goes wrong)
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: lmd-postgres
+    environment:
+      POSTGRES_USER: ${PGUSER:-lmd}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-lmd_pass}
+      POSTGRES_DB: ${PGDATABASE:-lateral}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # schema/*.sql run automatically, in filename order, on FIRST start only
+      # (i.e. only when pgdata is empty — after a `down -v`).
+      - ./schema:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-lmd} -d ${PGDATABASE:-lateral}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  neo4j:
+    image: neo4j:5-community
+    container_name: lmd-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j_pass}
+      # Caps so Neo4j's JVM does not grab several GB it never needs on a 16 GB laptop.
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512m
+    ports:
+      - "7474:7474"   # browser UI: http://localhost:7474
+      - "7687:7687"   # bolt driver (used from Python in Phase 3)
+    volumes:
+      - neo4jdata:/data
+
+volumes:
+  pgdata:
+  neo4jdata:
