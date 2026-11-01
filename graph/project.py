@@ -14,7 +14,7 @@ from __future__ import annotations
 WINDOW_HOURS = 24
 
 PULL_SQL = """
-SELECT e.event_id, e.ts, e.dst_host_id, e.target_user_id,
+SELECT e.event_id, e.ts, e.src_host_id, e.dst_host_id, e.target_user_id,
        v.is_new_host, (v.dst_sensitivity = 'high') AS sensitive,
        v.is_credential_switch
 FROM login_event e
@@ -41,19 +41,28 @@ def alert_context(cur, alert_id):
 
 
 def build_edges(cur, actor, trigger_ts):
-    """Consecutive host changes of the actor in the window -> edge list."""
+    """Movement edges of the actor in the window.
+
+    Prefer the explicit recorded source host (remote logons), so the chain
+    includes the origin machine; fall back to temporal succession for
+    interactive logons where no source host was recorded (§2.2)."""
     cur.execute(PULL_SQL, (actor, trigger_ts, WINDOW_HOURS, trigger_ts))
     rows = cur.fetchall()
-    edges, prev = [], None
-    for ev_id, ts, host, acct, new_host, sensitive, switch in rows:
-        if prev is not None and prev["host"] != host:
+    edges, prev_dst = [], None
+    for ev_id, ts, src_host, dst_host, acct, new_host, sensitive, switch in rows:
+        src = None
+        if src_host and src_host != dst_host:
+            src = src_host                       # explicit remote edge
+        elif prev_dst is not None and prev_dst != dst_host:
+            src = prev_dst                       # user-mediated succession edge
+        if src is not None:
             edges.append({
-                "src": prev["host"], "dst": host,
+                "src": src, "dst": dst_host,
                 "ts": ts.isoformat(), "event_id": ev_id, "acct": acct,
                 "actor": actor, "sensitive": bool(sensitive),
                 "new_host": bool(new_host), "switch": bool(switch),
             })
-        prev = {"host": host}
+        prev_dst = dst_host
     return edges
 
 

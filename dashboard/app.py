@@ -11,6 +11,7 @@ an alert and click Reconstruct. Run with:
 """
 from __future__ import annotations
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -46,6 +47,9 @@ st.sidebar.title("Lateral Movement")
 st.sidebar.caption("Risk-based investigation — CERT r4.2 + synthetic")
 min_score = st.sidebar.slider("Minimum score", 50, 100, 50, 5)
 only_truth = st.sidebar.checkbox("Only labeled (ground truth)", value=False)
+live = st.sidebar.checkbox("Live mode (auto-refresh)", value=False,
+                           help="For the demo: re-query every few seconds so new alerts appear")
+refresh_s = st.sidebar.slider("Refresh seconds", 2, 10, 3) if live else None
 
 st.sidebar.markdown("---")
 st.sidebar.info("This tool scores events for **investigation**. "
@@ -143,3 +147,8 @@ if len(queue):
             st.info("No path reconstructed yet — click the button above.")
 else:
     st.info("No alerts at this score threshold.")
+
+# live demo: re-run periodically so new alerts surface without a manual reload
+if live:
+    time.sleep(refresh_s)
+    st.rerun()

@@ -27,17 +27,21 @@ def damp(points_expr: str) -> str:
             f"THEN ({points_expr} * {S.ADMIN_DAMP})::int ELSE {points_expr} END")
 
 
-def build_points_sql() -> str:
+def build_points_sql(single: bool = False) -> str:
+    """Points per fired signal, long format, into temp table tmp_pts.
+    single=True scores exactly one event (live path); otherwise the whole
+    post-baseline period (batch). Both share this one definition."""
     w = S.WEIGHTS
+    base_filter = "AND e.event_id = %s" if single else f"AND e.ts >= TIMESTAMP '{S.CUTOFF}'"
     return f"""
-CREATE TEMP TABLE tmp_pts ON COMMIT DROP AS
+CREATE TEMP TABLE tmp_pts AS
 WITH base AS (
     SELECT e.event_id, e.ts, e.target_user_id AS uid, e.dst_host_id AS host,
            v.is_new_host, v.dst_sensitivity, v.is_credential_switch,
            v.is_after_termination, v.user_role, v.hour_of_day, e.source_user_id
     FROM login_event e
     JOIN v_login_enriched v ON v.event_id = e.event_id
-    WHERE e.ts >= TIMESTAMP '{S.CUTOFF}' AND e.success
+    WHERE e.success {base_filter}
 ),
 uhours AS (
     SELECT user_id, min(typical_hour_start) lo, max(typical_hour_end) hi
@@ -142,6 +146,39 @@ FROM ins i JOIN tmp_pts p ON p.event_id = i.trigger_event_id;
 """
 
 
+# Live path: score ONE event, append an alert if it crosses the threshold
+# (no truncate, no duplicate alert for an event already alerted).
+INCREMENTAL_SQL = f"""
+WITH scored AS (
+    SELECT event_id, ts, uid,
+           LEAST({S.SCORE_CAP}, sum(points))::real AS score,
+           (array_agg(signal ORDER BY points DESC))[1] AS top_signal
+    FROM tmp_pts GROUP BY event_id, ts, uid
+    HAVING sum(points) >= {S.THRESHOLD}
+),
+ins AS (
+    INSERT INTO alert (detected_ts, causal_user_id, rule_triggered, score, trigger_event_id)
+    SELECT s.ts, s.uid, s.top_signal, s.score, s.event_id FROM scored s
+    WHERE NOT EXISTS (SELECT 1 FROM alert a WHERE a.trigger_event_id = s.event_id)
+    RETURNING alert_id, trigger_event_id
+)
+INSERT INTO alert_reason (alert_id, signal, points, detail)
+SELECT i.alert_id, p.signal, p.points, p.detail
+FROM ins i JOIN tmp_pts p ON p.event_id = i.trigger_event_id
+RETURNING alert_id;
+"""
+
+
+def score_incremental(cur, event_id):
+    """Score one just-arrived event. Returns new alert_id or None.
+    Caller commits."""
+    cur.execute("DROP TABLE IF EXISTS tmp_pts")
+    cur.execute(build_points_sql(single=True), (event_id,))
+    cur.execute(INCREMENTAL_SQL)
+    rows = cur.fetchall()
+    return rows[0][0] if rows else None
+
+
 def main() -> None:
     argparse.ArgumentParser().parse_args()  # no options yet
 
@@ -150,6 +187,7 @@ def main() -> None:
         cur.execute("ALTER TABLE alert ADD COLUMN IF NOT EXISTS trigger_event_id BIGINT")
         conn.commit()
 
+        cur.execute("DROP TABLE IF EXISTS tmp_pts")
         cur.execute(build_points_sql())
         cur.execute(SCORE_AND_ALERT_SQL)
         conn.commit()

@@ -1,0 +1,11 @@
+{
+  "_comment": "Lab network. host_id MUST equal each machine's hostname (rsyslog sends the hostname, and the listener maps it to dst_host). ip is used to resolve the SSH 'from <ip>' source host. Edit IPs to match your VirtualBox internal network.",
+  "hosts": [
+    {"host_id": "foothold",      "ip": "10.10.10.10", "host_type": "workstation", "sensitivity": "low"},
+    {"host_id": "ws-01",         "ip": "10.10.10.11", "host_type": "workstation", "sensitivity": "low"},
+    {"host_id": "ws-02",         "ip": "10.10.10.12", "host_type": "workstation", "sensitivity": "low"},
+    {"host_id": "jump-01",       "ip": "10.10.10.13", "host_type": "server",      "sensitivity": "medium"},
+    {"host_id": "fileserver-01", "ip": "10.10.10.14", "host_type": "fileserver",  "sensitivity": "high"}
+  ],
+  "users": ["alice", "bob", "root"]
+}
